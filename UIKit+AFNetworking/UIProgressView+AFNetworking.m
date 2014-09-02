@@ -143,13 +143,18 @@ static void * AFTaskCountOfBytesReceivedContext = &AFTaskCountOfBytesReceivedCon
 #if __IPHONE_OS_VERSION_MIN_REQUIRED >= 70000
     if (context == AFTaskCountOfBytesSentContext || context == AFTaskCountOfBytesReceivedContext) {
         if ([keyPath isEqualToString:NSStringFromSelector(@selector(countOfBytesSent))]) {
-            if ([object countOfBytesExpectedToSend] > 0) {
+            
+            //upload content length issue
+            //            if ([object countOfBytesExpectedToSend] > 0) {
+            NSInteger byteToSend = [[[object originalRequest] valueForHTTPHeaderField:@"Content-Length"] integerValue];
+            if (byteToSend){
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    [self setProgress:[object countOfBytesSent] / ([object countOfBytesExpectedToSend] * 1.0f) animated:self.af_uploadProgressAnimated];
+                    [self setProgress:[object countOfBytesSent] / (byteToSend * 1.0f) animated:self.af_uploadProgressAnimated];
+                    //                    [self setProgress:[object countOfBytesSent] / ([object countOfBytesExpectedToSend] * 1.0f) animated:self.af_uploadProgressAnimated];
                 });
             }
         }
-
+        
         if ([keyPath isEqualToString:NSStringFromSelector(@selector(countOfBytesReceived))]) {
             if ([object countOfBytesExpectedToReceive] > 0) {
                 dispatch_async(dispatch_get_main_queue(), ^{
@@ -157,16 +162,16 @@ static void * AFTaskCountOfBytesReceivedContext = &AFTaskCountOfBytesReceivedCon
                 });
             }
         }
-
+        
         if ([keyPath isEqualToString:NSStringFromSelector(@selector(state))]) {
             if ([(NSURLSessionTask *)object state] == NSURLSessionTaskStateCompleted) {
                 @try {
                     [object removeObserver:self forKeyPath:NSStringFromSelector(@selector(state))];
-
+                    
                     if (context == AFTaskCountOfBytesSentContext) {
                         [object removeObserver:self forKeyPath:NSStringFromSelector(@selector(countOfBytesSent))];
                     }
-
+                    
                     if (context == AFTaskCountOfBytesReceivedContext) {
                         [object removeObserver:self forKeyPath:NSStringFromSelector(@selector(countOfBytesReceived))];
                     }
@@ -176,6 +181,7 @@ static void * AFTaskCountOfBytesReceivedContext = &AFTaskCountOfBytesReceivedCon
         }
     }
 #endif
+
 }
 
 @end
