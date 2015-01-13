@@ -429,6 +429,53 @@ forHTTPHeaderField:(NSString *)field
     return mutableRequest;
 }
 
+- (NSMutableURLRequest *)requestWithMultipartFormRequest:(NSURLRequest *)request
+                             writingStreamContentsToFile:(NSURL *)fileURL{
+    if (!request.HTTPBodyStream) {
+        return [request mutableCopy];
+    }
+    
+    NSParameterAssert([fileURL isFileURL]);
+    
+    NSInputStream *inputStream = request.HTTPBodyStream;
+    NSOutputStream *outputStream = [[NSOutputStream alloc] initWithURL:fileURL append:NO];
+    NSError *error = nil;
+    
+    [inputStream scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+    [outputStream scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+    
+    [inputStream open];
+    [outputStream open];
+    
+    while ([inputStream hasBytesAvailable] && [outputStream hasSpaceAvailable]) {
+        uint8_t buffer[1024];
+        
+        NSInteger bytesRead = [inputStream read:buffer maxLength:1024];
+        if (inputStream.streamError || bytesRead < 0) {
+            error = inputStream.streamError;
+            break;
+        }
+        
+        NSInteger bytesWritten = [outputStream write:buffer maxLength:(NSUInteger)bytesRead];
+        if (outputStream.streamError || bytesWritten < 0) {
+            error = outputStream.streamError;
+            break;
+        }
+        
+        if (bytesRead == 0 && bytesWritten == 0) {
+            break;
+        }
+    }
+    
+    [outputStream close];
+    [inputStream close];
+    
+    NSMutableURLRequest *mutableRequest = [request mutableCopy];
+    mutableRequest.HTTPBodyStream = nil;
+    
+    return mutableRequest;
+}
+
 #pragma mark - AFURLRequestSerialization
 
 - (NSURLRequest *)requestBySerializingRequest:(NSURLRequest *)request
