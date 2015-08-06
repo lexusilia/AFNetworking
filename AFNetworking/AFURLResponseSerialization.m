@@ -1,6 +1,5 @@
-// AFSerialization.h
-//
-// Copyright (c) 2013-2014 AFNetworking (http://afnetworking.com)
+// AFURLResponseSerialization.m
+// Copyright (c) 2011–2015 Alamofire Software Foundation (http://alamofire.org/)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -8,10 +7,10 @@
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -113,29 +112,34 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 
     if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
         if (self.acceptableContentTypes && ![self.acceptableContentTypes containsObject:[response MIMEType]]) {
-            if ([data length] > 0) {
-                NSDictionary *userInfo = @{
-                                           NSLocalizedDescriptionKey: [NSString stringWithFormat:NSLocalizedStringFromTable(@"Request failed: unacceptable content-type: %@", @"AFNetworking", nil), [response MIMEType]],
-                                           NSURLErrorFailingURLErrorKey:[response URL],
-                                           AFNetworkingOperationFailingURLResponseErrorKey: response,
-                                           AFNetworkingOperationFailingURLResponseDataErrorKey: data
-                                           };
+            if ([data length] > 0 && [response URL]) {
+                NSMutableDictionary *mutableUserInfo = [@{
+                                                          NSLocalizedDescriptionKey: [NSString stringWithFormat:NSLocalizedStringFromTable(@"Request failed: unacceptable content-type: %@", @"AFNetworking", nil), [response MIMEType]],
+                                                          NSURLErrorFailingURLErrorKey:[response URL],
+                                                          AFNetworkingOperationFailingURLResponseErrorKey: response,
+                                                        } mutableCopy];
+                if (data) {
+                    mutableUserInfo[AFNetworkingOperationFailingURLResponseDataErrorKey] = data;
+                }
 
-                validationError = AFErrorWithUnderlyingError([NSError errorWithDomain:AFURLResponseSerializationErrorDomain code:NSURLErrorCannotDecodeContentData userInfo:userInfo], validationError);
+                validationError = AFErrorWithUnderlyingError([NSError errorWithDomain:AFURLResponseSerializationErrorDomain code:NSURLErrorCannotDecodeContentData userInfo:mutableUserInfo], validationError);
             }
 
             responseIsValid = NO;
         }
 
-        if (self.acceptableStatusCodes && ![self.acceptableStatusCodes containsIndex:(NSUInteger)response.statusCode]) {
-            NSDictionary *userInfo = @{
-                                       NSLocalizedDescriptionKey: [NSString stringWithFormat:NSLocalizedStringFromTable(@"Request failed: %@ (%ld)", @"AFNetworking", nil), [NSHTTPURLResponse localizedStringForStatusCode:response.statusCode], (long)response.statusCode],
-                                       NSURLErrorFailingURLErrorKey:[response URL],
-                                       AFNetworkingOperationFailingURLResponseErrorKey: response,
-                                       AFNetworkingOperationFailingURLResponseDataErrorKey: data
-                                       };
+        if (self.acceptableStatusCodes && ![self.acceptableStatusCodes containsIndex:(NSUInteger)response.statusCode] && [response URL]) {
+            NSMutableDictionary *mutableUserInfo = [@{
+                                               NSLocalizedDescriptionKey: [NSString stringWithFormat:NSLocalizedStringFromTable(@"Request failed: %@ (%ld)", @"AFNetworking", nil), [NSHTTPURLResponse localizedStringForStatusCode:response.statusCode], (long)response.statusCode],
+                                               NSURLErrorFailingURLErrorKey:[response URL],
+                                               AFNetworkingOperationFailingURLResponseErrorKey: response,
+                                       } mutableCopy];
 
-            validationError = AFErrorWithUnderlyingError([NSError errorWithDomain:AFURLResponseSerializationErrorDomain code:NSURLErrorBadServerResponse userInfo:userInfo], validationError);
+            if (data) {
+                mutableUserInfo[AFNetworkingOperationFailingURLResponseDataErrorKey] = data;
+            }
+
+            validationError = AFErrorWithUnderlyingError([NSError errorWithDomain:AFURLResponseSerializationErrorDomain code:NSURLErrorBadServerResponse userInfo:mutableUserInfo], validationError);
 
             responseIsValid = NO;
         }
@@ -199,7 +203,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 @implementation AFJSONResponseSerializer
 
 + (instancetype)serializer {
-    return [self serializerWithReadingOptions:0];
+    return [self serializerWithReadingOptions:(NSJSONReadingOptions)0];
 }
 
 + (instancetype)serializerWithReadingOptions:(NSJSONReadingOptions)readingOptions {
@@ -271,11 +275,11 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
     if (self.removesKeysWithNullValues && responseObject) {
         responseObject = AFJSONObjectByRemovingKeysWithNullValues(responseObject, self.readingOptions);
     }
-    
+
     if (error) {
         *error = AFErrorWithUnderlyingError(serializationError, *error);
     }
-    
+
     return responseObject;
 }
 
@@ -527,6 +531,9 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 
 static UIImage * AFImageWithDataAtScale(NSData *data, CGFloat scale) {
     UIImage *image = [[UIImage alloc] initWithData:data];
+    if (image.images) {
+        return image;
+    }
 
     return [[UIImage alloc] initWithCGImage:[image CGImage] scale:scale orientation:image.imageOrientation];
 }
@@ -544,10 +551,11 @@ static UIImage * AFInflatedImageFromResponseWithDataAtScale(NSHTTPURLResponse *r
     } else if ([response.MIMEType isEqualToString:@"image/jpeg"]) {
         imageRef = CGImageCreateWithJPEGDataProvider(dataProvider, NULL, true, kCGRenderingIntentDefault);
 
-        // CGImageCreateWithJPEGDataProvider does not properly handle CMKY, so if so, fall back to AFImageWithDataAtScale
         if (imageRef) {
             CGColorSpaceRef imageColorSpace = CGImageGetColorSpace(imageRef);
             CGColorSpaceModel imageColorSpaceModel = CGColorSpaceGetModel(imageColorSpace);
+
+            // CGImageCreateWithJPEGDataProvider does not properly handle CMKY, so fall back to AFImageWithDataAtScale
             if (imageColorSpaceModel == kCGColorSpaceModelCMYK) {
                 CGImageRelease(imageRef);
                 imageRef = NULL;
@@ -579,13 +587,16 @@ static UIImage * AFInflatedImageFromResponseWithDataAtScale(NSHTTPURLResponse *r
         return image;
     }
 
-    size_t bytesPerRow = 0; // CGImageGetBytesPerRow() calculates incorrectly in iOS 5.0, so defer to CGBitmapContextCreate
+    // CGImageGetBytesPerRow() calculates incorrectly in iOS 5.0, so defer to CGBitmapContextCreate
+    size_t bytesPerRow = 0;
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
     CGColorSpaceModel colorSpaceModel = CGColorSpaceGetModel(colorSpace);
     CGBitmapInfo bitmapInfo = CGImageGetBitmapInfo(imageRef);
 
     if (colorSpaceModel == kCGColorSpaceModelRGB) {
         uint32_t alpha = (bitmapInfo & kCGBitmapAlphaInfoMask);
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wassign-enum"
         if (alpha == kCGImageAlphaNone) {
             bitmapInfo &= ~kCGBitmapAlphaInfoMask;
             bitmapInfo |= kCGImageAlphaNoneSkipFirst;
@@ -593,6 +604,7 @@ static UIImage * AFInflatedImageFromResponseWithDataAtScale(NSHTTPURLResponse *r
             bitmapInfo &= ~kCGBitmapAlphaInfoMask;
             bitmapInfo |= kCGImageAlphaPremultipliedFirst;
         }
+#pragma clang diagnostic pop
     }
 
     CGContextRef context = CGBitmapContextCreate(NULL, width, height, bitsPerComponent, bytesPerRow, colorSpace, bitmapInfo);
@@ -614,7 +626,7 @@ static UIImage * AFInflatedImageFromResponseWithDataAtScale(NSHTTPURLResponse *r
 
     CGImageRelease(inflatedImageRef);
     CGImageRelease(imageRef);
-    
+
     return inflatedImage;
 }
 #endif
@@ -750,7 +762,7 @@ static UIImage * AFInflatedImageFromResponseWithDataAtScale(NSHTTPURLResponse *r
             return responseObject;
         }
     }
-    
+
     return [super responseObjectForResponse:response data:data error:error];
 }
 
